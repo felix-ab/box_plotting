@@ -43,6 +43,7 @@ def read_demographics_data(demographics_folder_path,demographics_2022,gender_dem
     sport_dict = {}
     birthday_dict = {}
     name_dict = {}
+    email_dict = {}
     gender_dict = {}
     grade_dict = {}
     #reading 2021 data
@@ -65,10 +66,12 @@ def read_demographics_data(demographics_folder_path,demographics_2022,gender_dem
             else:
                 grade = 'unknown'
             Sport = row1[13]
+            email = row1[9]
             sport_dict[Patient] = Sport
             birthday_dict[Patient] = birthday
             name_dict[Patient] = name
             grade_dict[Patient] = grade
+            email_dict[Patient] = email
     #adding gender for 2021 data
     with open(gender_demographics_2021, 'r') as file1:
         reader = csv.reader(file1)
@@ -92,6 +95,7 @@ def read_demographics_data(demographics_folder_path,demographics_2022,gender_dem
             else:
                 birthday = row[10]
             #birthday = row[10]
+            email = row[11]
             Sport = row[16]
             gender = row[9]
             if row[11][:2].isnumeric() == True:
@@ -105,7 +109,8 @@ def read_demographics_data(demographics_folder_path,demographics_2022,gender_dem
             name_dict[Patient] = name
             gender_dict[Patient] = gender 
             grade_dict[Patient] = grade 
-    dict_list = [birthday_dict, sport_dict, name_dict, gender_dict, grade_dict]
+            email_dict[Patient] = email
+    dict_list = [birthday_dict, sport_dict, name_dict, gender_dict, grade_dict, email_dict]
     return dict_list  
 
 def add_demographics_data(new_df, dict_list):
@@ -138,6 +143,11 @@ def add_demographics_data(new_df, dict_list):
             new_df.at[i,'grade'] = grade_temp
         else:
             new_df.at[i,'grade'] = 'unknown'
+        if id in dict_list[5]:
+            email_temp = dict_list[5].get(id)
+            new_df.at[i,'email'] = email_temp
+        else:
+            new_df.at[i,'email'] = 'unknown'
     # Convert the 'date' column to a datetime object
     new_df['birthday'] = pd.to_datetime(new_df['birthday'], infer_datetime_format=True)
     new_df['date'] = pd.to_datetime(new_df['date'], infer_datetime_format=True)
@@ -146,7 +156,7 @@ def add_demographics_data(new_df, dict_list):
     # puts all mistake birth years into the same category
     new_df['birth_year'] = new_df['birth_year'].apply(lambda x: 2023 if x > 2020 else x)
     # Convert the DataFrame to an Excel file and export it
-    new_df.to_excel('all_hrv_2.xlsx', index=False)
+    new_df.to_excel('all_hrv_email.xlsx', index=False)
 
     #group the sport column by its unique values and count the occurrences
     counts = new_df.groupby('Sport').size()
@@ -156,9 +166,21 @@ def add_demographics_data(new_df, dict_list):
     new_df.loc[mask, 'Sport'] = 'Other'
     #replace "No_Sport" with "other"
     new_df.loc[new_df['Sport'] == 'No_Sport', 'Sport'] = 'Other'
+    new_df['Sport'] = new_df['Sport'].str.replace("Girl's", "Girls")
+    new_df['Sport'] = new_df['Sport'].str.replace("Boy's", "Boys")
+    new_df.to_excel('df_with_email.xlsx')
     return new_df
 
 def group_data_by_variable(new_df, group_var, hr_var):
+    if group_var == 'age':
+        # Convert timestamp columns to datetime objects
+        new_df['birthday'] = pd.to_datetime(new_df['birthday'])
+        new_df['date'] = pd.to_datetime(new_df['date'])
+        # Calculate the age in years
+        age = (new_df['date'] - new_df['birthday']).dt.total_seconds() / (365.25 * 24 * 3600)
+        new_df['age'] = age
+        new_df['age'] = new_df['age'].apply(np.floor).astype(int)
+        new_df.loc[new_df['age'] < 5, 'age'] = 100
     grouped_data = []
     unique_groups = np.unique(new_df[group_var])
     for group in unique_groups:
@@ -166,10 +188,16 @@ def group_data_by_variable(new_df, group_var, hr_var):
     if group_var == 'Sport':
         idx = np.where(unique_groups == 'Other')[0][0]
         unique_groups = np.concatenate((np.delete(unique_groups, idx), ['Other']))
+        sport_order = {'Boys Basketball': 0, 'Girls Basketball': 1,'Boys Soccer': 2,
+        'Girls Soccer': 3,'Cross Country': 4, 'Field Hockey': 5,'Football': 6,'Ice Hockey': 7,'Squash': 8,
+        'Tennis': 9,'Volleyball': 10,'Water Polo': 11,'Other': 12}
+        unique_groups = sorted(unique_groups, key=lambda s: sport_order[s])
     return unique_groups, grouped_data
 
 def stats_and_plotting(unique_groups,grouped_data,new_df,hr_var,group_var, counter):
-    save_path = '/Users/felixbrener/Documents/saved_figures/'
+    save_path = '/Users/felixbrener/Documents/hr_sdnn_rmssd/'
+    #convert HRV related columns to numeric format so the violin plots can work
+    new_df[['quality', 'HR', 'AVNN', 'SDNN','RMSSD','PNN50']] = new_df[['quality', 'HR', 'AVNN', 'SDNN','RMSSD','PNN50']].apply(pd.to_numeric)
     f_result= stats.f_oneway(*grouped_data)
     plt.figure(counter, figsize=(13, 8))
     #removing erronoius measurements
@@ -197,12 +225,23 @@ def stats_and_plotting(unique_groups,grouped_data,new_df,hr_var,group_var, count
         #filtering the rows where the value is less than 0.05
         filtered_rows = molten_df[molten_df['value'] < 0.05]
         #creating box plots
-        ax = sns.boxplot(data=new_df, x=group_var, y=hr_var, order=unique_groups)
-        if hr_var == 'RMSSD' or hr_var =='SDNN':
+        #ax = sns.boxplot(data=new_df, x=group_var, y=hr_var, order=unique_groups)
+        #ax = sns.boxplot(data=new_df, x=group_var, y=hr_var, order=unique_groups)
+        ax = sns.violinplot(data=new_df, x=group_var, y=hr_var, order=unique_groups, color = '#E1E1E1', linewidth= 0)
+        ax = sns.swarmplot(data=new_df, x=group_var, y=hr_var, order=unique_groups, hue = 'gender', alpha = 0.7)#color = '#FFFFFF',, edgecolor='black'
+        # add pointplot with average values
+        ax = sns.pointplot(data=new_df, x=group_var, y=hr_var, color="black", markers="d", join=False, ci=None, size=10, order=unique_groups, linewidth=2, label='Group Average')
+        #ax = sns.regplot(data=reg_df, x=group_var, y=hr_var, color="black")
+        if hr_var == 'RMSSD' or hr_var =='SDNN' or hr_var =='AVNN':
             ax.set(xlabel =group_var, ylabel = hr_var + "(ms)", title = hr_var +' by '+group_var)
+        elif hr_var == 'HR':
+            ax.set(xlabel =group_var, ylabel = hr_var + "(bpm)", title = hr_var +' by '+group_var)
+        elif hr_var == 'PNN50':
+            ax.set(xlabel =group_var, ylabel = hr_var + "(percentage)", title = hr_var +' by '+group_var)
         else:
             ax.set(xlabel =group_var, ylabel = hr_var, title = hr_var +' by '+group_var)
-        
+        if group_var == 'gender':
+            ax.set(xlabel='Gender')
         ax.text(0, 1.006, "p-value annotation legend:\nNot Significant: p > 5.00e-02\n*: 1.00e-02 < p <= 5.00e-02\n**: 1.00e-03 < p <= 1.00e-02\n***: 1.00e-04 < p <= 1.00e-03\n****: p <= 1.00e-04", transform=ax.transAxes, fontsize=9)
         ax.text(0.8, 1.006, "n = " + str(len(new_df)) + " subjects\nAll subjects with "+str(hr_var)+ minimumval + "have been removed from the dataset", transform=ax.transAxes, fontsize=9)
         if len(filtered_rows) > 0:
@@ -216,9 +255,24 @@ def stats_and_plotting(unique_groups,grouped_data,new_df,hr_var,group_var, count
         plt.title(hr_var +' by '+ group_var)
         if len(unique_groups) > 10:
             plt.xticks(rotation=15)
+        # double the number of y-axis tic marks if there are less than 9
+        if len(ax.get_yticks()) < 10:
+            tick_interval = (ax.get_yticks()[-1] - ax.get_yticks()[0]) / (len(ax.get_yticks()) - 1)
+            new_ticks = [ax.get_yticks()[0] + i*tick_interval/2 for i in range(2*len(ax.get_yticks())-1)]
+            ax.set_yticks(new_ticks)
         plt.axhline(y=np.mean(new_df[hr_var]), color='#00E665', linestyle='--', label='Average '+ hr_var)
+        # count the number of data points in each group
+        counts = new_df[group_var].value_counts()
+        # create a dictionary to map the counts to the group names
+        count_dict = dict(zip(counts.index, counts.values))
+        # add the counts to the x-tick labels
+        if group_var == 'birth_year':
+            unique_groups = ['unknown' if x == 2023 else x for x in unique_groups]
+            count_dict['unknown'] = count_dict.pop(2023)
+        xtick_labels = [f'{name}\n({count_dict[name]})' for name in unique_groups]
+        ax.set_xticklabels(xtick_labels)
         plt.legend()
-        if counter == 8:
+        if counter == 30:
             plt.show()
         else:
             plt.show(block = False)
@@ -226,23 +280,55 @@ def stats_and_plotting(unique_groups,grouped_data,new_df,hr_var,group_var, count
     else:
         print('Unable to reject hypothesis')
         
-        ax = sns.boxplot(data=new_df, x=group_var, y=hr_var, order=unique_groups)
-        if hr_var == 'RMSSD' or hr_var =='SDNN':
+        #ax = sns.boxplot(data=new_df, x=group_var, y=hr_var, order=unique_groups)
+        ax = sns.violinplot(data=new_df, x=group_var, y=hr_var, order=unique_groups, color = '#E1E1E1', linewidth= 0)
+        ax = sns.swarmplot(data=new_df, x=group_var, y=hr_var, order=unique_groups, hue = 'gender', alpha = 0.7)#color = '#FFFFFF',, edgecolor='black'
+        #ax = sns.violinplot(data=new_df, x=group_var, y=hr_var, order=unique_groups, alpha = 0.5)#color='#DDDDDD'
+        #ax = sns.swarmplot(data=new_df, x=group_var, y=hr_var, order=unique_groups, alpha = 0.7, color ='#FFFFFF',edgecolor='black')#hue='gender'
+        # add pointplot with average values
+        ax = sns.pointplot(data=new_df, x=group_var, y=hr_var, color="black", markers="d", scale=1.5, join=False, ci=None, size=10, order=unique_groups, linewidth=2, label='Group Average')
+        if hr_var == 'RMSSD' or hr_var =='SDNN' or hr_var =='AVNN':
             ax.set(xlabel =group_var, ylabel = hr_var + "(ms)", title = hr_var +' by '+group_var)
+        elif hr_var == 'HR':
+            ax.set(xlabel =group_var, ylabel = hr_var + "(bpm)", title = hr_var +' by '+group_var)
+        elif hr_var == 'PNN50':
+            ax.set(xlabel =group_var, ylabel = hr_var + "(percentage)", title = hr_var +' by '+group_var)
         else:
             ax.set(xlabel =group_var, ylabel = hr_var, title = hr_var +' by '+group_var)
+        if group_var == 'gender':
+            ax.set(xlabel='Gender')
+        if group_var == 'age':
+            ax.set(xlabel = 'Age (years) at Time of Recording')
         plt.title(hr_var +' by '+ group_var)
         ax.text(0.89, 1.006, "n = " + str(len(new_df)) + " subjects", transform=ax.transAxes, fontsize=9)
         labels_fixed = list(unique_groups[:-1]) + ['unknown']
         plt.xticks(range(len(unique_groups)), labels_fixed)
+        # double the number of y-axis tic marks if there are less than 9
+        if len(ax.get_yticks()) < 10:
+            tick_interval = (ax.get_yticks()[-1] - ax.get_yticks()[0]) / (len(ax.get_yticks()) - 1)
+            new_ticks = [ax.get_yticks()[0] + i*tick_interval/2 for i in range(2*len(ax.get_yticks())-1)]
+            ax.set_yticks(new_ticks)
         plt.axhline(y=np.mean(new_df[hr_var]), color='#00E665', linestyle='--', label='Average '+ hr_var)
+        # count the number of data points in each group
+        counts = new_df[group_var].value_counts()
+        # create a dictionary to map the counts to the group names
+        count_dict = dict(zip(counts.index, counts.values))
+        # add the counts to the x-tick labels
+        if group_var == 'birth_year':
+            unique_groups = ['unknown' if x == 2023 else x for x in unique_groups]
+            count_dict['unknown'] = count_dict.pop(2023)
+        if group_var == 'age':
+            unique_groups = ['unknown' if x == 100 else x for x in unique_groups]
+            count_dict['unknown'] = count_dict.pop(100)
+        xtick_labels = [f'{name}\n({count_dict[name]})' for name in unique_groups]
+        ax.set_xticklabels(xtick_labels)
         plt.legend()
-        if counter == 16:
+        if counter == 30:
             plt.show(block = True)
         else:
             plt.show(block = False)
     # save the figure
-    fig_name = 'figure_' + str(counter) + '.png'  # change the file name as per your preference
+    fig_name = 'sport_gender_' + str(counter) + '.png'  # change the file name as per your preference
     plt.savefig(save_path + fig_name)
 
 
@@ -254,8 +340,8 @@ if __name__ == '__main__':
     demographics_2022 = '/Users/felixbrener/Downloads/PlaySafety20222023_DATA_2023-02-27_1040.csv'
     gender_demographics_2021 = '/Users/felixbrener/Documents/ARC/gender_2021_demographics.csv'
 
-    hrv_list = ['HR','AVNN', 'SDNN', 'RMSSD','PNN50']
-    group_list = ['Sport','birth_year','gender']
+    hrv_list = ['HR', 'SDNN', 'RMSSD']#'AVNN','PNN50'
+    group_list = ['Sport']#'age','birth_year','gender'
     counter = 0
 
     #reads in the hrv and demographic data 
@@ -280,3 +366,5 @@ if __name__ == '__main__':
             #group_data_by_variable calls add_demographics_data
             #add_demographics_data calls read_demographics_data and read_hrv_data 
             #group_data_by_variable()
+
+    #switch statements
